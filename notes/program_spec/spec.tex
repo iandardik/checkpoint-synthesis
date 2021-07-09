@@ -1,0 +1,168 @@
+\documentclass[12pt]{article}
+\usepackage{anysize}
+\marginsize{1.2cm}{1.4cm}{.4cm}{1cm}
+
+\usepackage[normalem]{ulem}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage[shortlabels]{enumitem}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{hyperref}
+\lstset{
+  basicstyle=\ttfamily,
+  mathescape
+}
+
+\setlength{\parindent}{0pt}
+
+\title{Using Search to Synthesize a Checkpoint Program}
+\date{Summer 2021}
+\author{Ian Dardik}
+
+\begin{document}
+
+\maketitle
+
+\section{Intro}
+This note is the formal description of the checkpoint program synthesis problem and my plan for implementation.  Here is a high level description of the program: \\
+
+A user wants to create a distributed program and already has a good idea of what their desired algorithm looks like.  However, the user does not want to write the algorithm by hand because they don't want to debug a distributed program.  Instead, the user can input a precise statement of requirements to the synthesizer to produce a program that is guaranteed to satisfy all the given requirements.  The more precise the given requirements are, the more likely we are to synthesize a program that the user desires.  
+
+\section{Background}
+\subsection{The nested exponential search in program synthesis}
+	We can synthesize a program for $p$ processes using the following BFS algorithm:
+	\begin{verbatim}
+		input: requirements
+		queue = [noop]
+		while true:
+		  program = pop(queue)
+		  for instruction in AllInstructions:  // branching exp
+		    newProgram = program + instruction
+		    if satisfiesAllRequirements(newProgram, requirements):  // interlreaving exp
+		      return newProgram
+		    if noSafetyViolations(newProgram, requirements):  // interlreaving exp
+		      add(queue, newProgram)
+	\end{verbatim}
+
+	Note that there are two nested exponentials here:
+	\begin{enumerate}
+		\item The branching factor that is $O(b^n)$, where $b=|AllInstructions|$ (the number of available instructions) and $n$ is the number of lines in the program
+		\item The time it takes to check all interleavings of the $p$ processes to make sure that all requirements are satisfied in a given program.  
+	\end{enumerate}
+
+	I believe these are the two nested exponentials mentioned in \cite{asdp}, however I may be wrong.  Either way, this is clearly very expensive.  
+
+\subsection{Checkpointing}
+	We will try to synthesize a distributed program, but we will restrict our search to only synthesize a checkpoint program.  A checkpoint program is a distributed program that has checkpoipnts every few lines of code.  A checkpoint is simply a barrier that synchronizes all processes.  In this note we'll attempt to build checkpoint programs that have a checkpoint after \textit{every} line of code whenever possible; we will only delay a checkpoint when we need to prevent a deadlock.  Synthesizing a checkpoint program is easier than synthesizing a general distributed program because requirement-satisfaction checking only needs to happen between checkpoints.  If we restrict our possible programs to have at most $N$ lines of code between checkpoints and hold the number of processes $p$ constant, then the number of interleavings we must check between any two checkpoints is bounded by some constant $il(N,p)$ (the number of interleavings of $N$ lines of code for $p$ processes).  Thus checking requirement-satisfaction for a program of length $n$ becomes $O(il(N,p)*n)$ instead of $O(il(n,p))$; that is, linear instead of exponential in terms of $n$.  \\
+
+	Naturally, we incur several disadvantages with this method:
+	\begin{enumerate}
+		\item Restricting the number of lines without a checkpoint to $N$ can cause the algorithm to miss potential solutions (programs that satisfy our requirements), however the gain in efficiency may prove to make this a worthwhile tradeoff.  
+		\item Checkpoints reduce the parallelism of each process and can slow down the program we synthesize.  My hope is that once we have produced a checkpoint program, it will be possible to perform some optimization by deleting unnecessary checkpoints to speed up the program.  
+		\item Although we reduced the nested exponential to a linear check, the branching factor still yields an overall exponential runtime for our search algorithm.  It may be interesting to perform some analysis to see how many branches we prune because of safety violations, and see if/when it affects the asymptotic runtime of the algorithm.  
+	\end{enumerate}
+
+
+\section{Formal Problem Description}
+\subsection{The Problem}
+The inputs are:
+	\begin{enumerate}
+		\item State variables.  
+		\item Initial state.  
+		\item Safety requirements.  
+		\item Liveness requirements.  
+		\item The set of all possible instructions in the program.  
+		\item ``Decisions": some variables may have state transitions that are optional, and thus any instruction that takes the variable on this transition will be a ``decision" by the user.  
+		\item It is very likely I'll allow additional inputs in the future.  
+	\end{enumerate}
+
+Given these inputs, the program will either output a program that satisfies the given requirements or will time out with no solution.  For the near term future we will output a checkpoint program, however it would be nice to eventually optimize the synthesized program to remove as many checkpoints as possible. 
+
+\subsection{States}
+State variables are described by a domain.  We produce the domain of all possible states as the cartesian product of the domain across all state variables.  As part of the program input the user must label each variable as global or local.  Note that because the state variables are given, we can view our problem as a variant of a protocol completion problem.  
+
+\subsection{Input Language}
+The safety and liveness requirements will be specified using an input language that will likely resemble TLA+.  The input language is very important because it defines the expressive power that the user has to describe a specific program; the richer the language, the more likely a user can specify a program that they want and will find useful.  Implementing each language feature may not be easy, especially since operators ought to be composable.  For the time being I will support AND, OR, $~\sim>$ (leads to), and expressions that test variable values (i.e. flag[p] = TRUE).  In the future I may attempt to support additional features such as IF-THEN-ELSE, ALWAYS, EVENTUALLY, and fairness.  
+
+\subsection{Instruction Set}
+The list of all possible instructions that the program can execute.  This replaces the previous idea of a ``transition constraint".  
+
+\subsection{Decisions}
+A \textit{decision} is tool for a user to specify a rule $r$ as a decision $Dec(r)$.  For example, if the rule $r= \forall p \in ProcSet : \lnot flag[p] --> flag[p]$, then $Dec(r)$ means that any instruction that changes a process' flag from FALSE to TRUE is considered a \textit{decision instruction}.  Any instruction that is executed after a decision instruction must check the current state for validity, but also the state identical to the current state except all other processes $q \neq p$ flags are set to FALSE.  The idea here is that a process flipping its flag from FALSE to TRUE is a \textit{decision} and does not have to happen at all for any given process.  \\
+
+This concept will support my needs for now, but I suspect it is not general enough to keep as an input in the long term.  I will most likely need to extend decisions or replace them by a more general and powerful concept in the future.  
+
+\subsection{Example}
+My first goal is to synthesize a program that's essentially equivalent to Peterson's Mutual Exclusion Algorithm so I will present this as an example.  I believe that the following inputs will synthesize a program that's ``close enough" to Peterson's.  Assume $ProcSet = \{0,1\}$, then:
+	\begin{enumerate}
+		\item State variables: cs (critical section): local, flag: global, turn: global.  Their type signatures are: \\
+				$\forall p \in ProcSet : cs[p] \in \{TRUE,FALSE\}$ \\
+				$\forall p \in ProcSet : flag[p] \in \{TRUE,FALSE\}$ \\
+				$turn \in ProcSet$
+		\item Initial state: $turn = 0$, $\forall p \in ProcSet: \lnot cs[p] \wedge \lnot flag[p]$
+		\item Safety requirements:
+			\begin{enumerate}
+				\item $\forall p,q \in ProcSet : cs[p] \wedge cs[q] => p = q$ (mutual exclusion)
+				\item $\forall p \in ProcSet : cs[p] => flag[p]$
+			\end{enumerate}
+		\item Liveness requirements:
+			\begin{enumerate}
+				\item Required state: $\forall p \in ProcSet : cs[p]$.  This just tells the program that at some point each process must enter the critical section.  
+				\item $\forall p \in ProcSet : flag[p] ~\sim> cs[p]$
+				\item $\forall p \in ProcSet : flag[p] ~\sim> \lnot flag[p]$
+				\item $\forall p \in ProcSet : cs[p] ~\sim> \lnot cs[p]$
+			\end{enumerate}
+		\item Transition constraint: one variable may change at a time
+		\item ``Decisions": $\forall p \in ProcSet : Dec(\lnot flag[p] --> flag[p])$.  This specifies that if the flag changes from FALSE to TRUE for a process, it is a \textit{decision}.  
+	\end{enumerate}
+
+Given these inputs, I believe that the program should be able to synthesize an algorithm that is fairly close to Peterson's algorithm.  In particular, these inputs will avoid synthesizing a round-robin algorithm where each process \textit{must} enter the critical section in each round because:
+	\begin{enumerate}
+		\item A process $p$ sets its flag to TRUE, showing its intent to enter the critical section
+		\item $p$ must enter the critical section, given by liveness requirements (a) and (b).  Also note that $flag[p]$ when $p$ enters the critical section by safety requirement (b).  
+		\item $p$ must be able to enter the critical section while $\forall q \in ProcSet : q \neq p$, $\lnot flag[q]$ because setting a process' flag to TRUE is a \textit{decision}.
+	\end{enumerate}
+As a result, we must synthesize an algorithm where one process $p$ can enter the critical section while all other processes $q$ do not intend to enter the critical section.  \\
+
+Unfortunately, the synthesized algorithm is only guaranteed to satisfy one of the the three required properties that are required to solve the critical section problem \cite{mutex}:
+	\begin{enumerate}
+		\item Satisfies Mutual Exclusion: given by the safety property (a)
+		\item Does not satisfy Progress: the given requirements still allow us to synthesize a program that lets processes into the critical section in a round-robin fashion based on the $turn$ global variable.  This means that all processes can be a part of deciding who enters the critical section and when.  
+		\item Does not satisfy Bounded Waiting: we will synthesize a program that \textit{does} have a bounded amount of time for how long it takes a process to enter the critical section once it expresses intent; however, that time bound is not guaranteed to be a function of the number of processes.  
+	\end{enumerate}
+
+I will need to think more about how to express the Progress and Bounded Waiting properties so we can synthesize programs with these guarantees.  This may involve adding more features to the input languages, and potentially altering or replacing decisions.  I plan on figuring out how to express the Progress propety before implementing the synthesizer; I do not plan on figuring out how to express Bounded Waiting before implementing the synthesizer (although it would be nice if I could figure this out).  
+
+
+\section{Implementation}
+\subsection{BFS}
+Implicitly abides by Occams Razor
+
+\subsection{Loops}
+Loop conditions will be branched by loop invariants, not by the conditions themselves.  
+
+
+\begin{thebibliography}{9}
+\bibitem{asdp}
+Rajeev Alur, Stavors Tripakis (2017).  ACM SIGACT News, Volume 48, Issue 1.  pp 55–90
+
+\bibitem{mutex}
+Wikipedia: Peterson's algorithm.  \url{https://en.wikipedia.org/wiki/Peterson\%27s_algorithm}
+\end{thebibliography}
+
+\end{document}
+
+
+
+
+
+
+
+
+
+
+
+
+

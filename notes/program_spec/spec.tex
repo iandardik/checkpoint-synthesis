@@ -215,7 +215,7 @@ All liveness properties are in the form of ``leads to" so we can create a direct
 \end{tikzpicture}
 \end{center}
 
-Cycles in the graph are dangerous: unless the desired program we're synthesizing avoids entering a state before the end of the cycle, we can guarantee that it will have a liveness violation once it terminates; we make our life simpler and return an error if we find any cycles.  If there are multiple (unconnected) graphs then we can be sure they are separated by Stationary States.  For now we will reject any specifications whose liveness properties aren't connected to make the problem simpler.  Therefore, for the time being, it suffices to consider a single connected DAG.  Below are two potential methods for handling the DAG.  
+If there are multiple (unconnected) graphs then we can be sure they are separated by Stationary States.  It may be easier to reject any specifications whose liveness properties aren't connected to make the problem simpler, but I'll have to think about thi more.  
 
 \subsubsection{Deterministic Method}
 The deterministic method is based on the philosphy that if the user specifies the entire algorithm using liveness properties, then the synthesizer should have an easy time finding a correct program.  For example, if the user decides to specify Peterson's Algorithm as in example 3.1, but includes the following \textit{additional} liveness requirements:

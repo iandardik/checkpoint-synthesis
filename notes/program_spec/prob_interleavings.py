@@ -4,7 +4,7 @@ def f(n, p):
     return math.factorial(n*p) / (math.factorial(n)**p)
 
 def g(n, p):
-    return max(1000 * n**2, 1)
+    return 5e6
     #return (100 * n)**(2*p)
     #return math.floor( f(n,p) / 2 )
     #rv = math.floor( f(n,p) / max(n**8,1) )
@@ -36,11 +36,10 @@ def diff_path_per_k(i, j, p):
         prob *= 1 - min(h(i, i+k, p)*g(i+k,p), 1)
     return 1-prob
 
-for i in range(0,51,10):
-    j = i + 5
+for i in range(0,201,10):
+    j = i + 0
     p = 2
     r = always_random(i, j, p)
-    s = diff_path_per_k(i, j, p)
-    print("rand={:.5f}, diff={:.5f} | f(i,p)={:e}, g(i,p)={:e}, i={}, j={}".format(r,s,f(i,p),g(i,p),i,j))
+    print("rand={:.5f} | f(i,p)={:e}, g(i,p)={:e}, i={}, j={}".format(r,f(i,p),g(i,p),i,j))
 
 #print(f(0, 20))
